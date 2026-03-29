@@ -10,7 +10,8 @@ class TelegramBot:
     def __init__(self, token: str, db: JobsDatabase):
         self.token = token
         self.db = db
-        self.app = Application.builder().token(token).build()
+        self.updater = Updater(token)
+        self.dispatcher = self.updater.dispatcher
         self.setup_handlers()
     
     def setup_handlers(self):
