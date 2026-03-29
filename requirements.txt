@@ -5,3 +5,5 @@ webdriver-manager==4.0.1
 apscheduler==3.6.3
 python-dotenv==1.0.0
 setuptools<81
+urllib3==1.26.18
+six==1.16.0
