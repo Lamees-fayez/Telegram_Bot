@@ -4,5 +4,5 @@ beautifulsoup4==4.12.2
 webdriver-manager==4.0.1
 apscheduler==3.6.3
 python-dotenv==1.0.0
-setuptools
+setuptools<82
 
