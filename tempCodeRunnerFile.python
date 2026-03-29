@@ -1,0 +1,148 @@
+import requests
+from bs4 import BeautifulSoup
+import telegram
+import time
+import threading
+import os
+from telegram.ext import Updater, CommandHandler
+
+# -----------------------------
+# إعداد المتغيرات
+# -----------------------------
+TOKEN = os.environ.get("8322731519:AAG9qnGdud3cjvNGXk97yIMhlUJcJwicfAg")  # من Environment Variables على Railway أو ضع التوكن مباشرة هنا
+CHAT_ID = os.environ.get("8322731519")  # من Environment Variables أو ضع رقم الشات هنا مباشرة
+
+bot = telegram.Bot(token=TOKEN)
+
+# -----------------------------
+# الكلمات المفتاحية
+# -----------------------------
+keywords = [
+    "microsoft excel",
+    "excel",
+    "اكسل",
+    "dashboard",
+    "داش بورد",
+    "eda",
+    "تحليل بيانات",
+    "data analysis"
+]
+
+# لتجنب تكرار نفس الوظيفة
+sent_links = set()
+
+headers = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+# -----------------------------
+# دالة إرسال الرسائل
+# -----------------------------
+def send(title, link, site):
+    msg = f"""
+وظيفة جديدة 🔥
+
+الموقع: {site}
+
+العنوان:
+{title}
+
+الرابط:
+{link}
+"""
+    bot.send_message(chat_id=CHAT_ID, text=msg)
+
+# -----------------------------
+# فحص المواقع
+# -----------------------------
+def check_mostaql():
+    url = "https://mostaql.com/projects"
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "lxml")
+    jobs = soup.find_all("a")
+    for job in jobs:
+        title = job.text.lower()
+        if any(k in title for k in keywords):
+            link = job.get("href")
+            if link and link not in sent_links:
+                link = "https://mostaql.com" + link
+                send(title, link, "Mostaql")
+                sent_links.add(link)
+
+def check_nafezly():
+    url = "https://nafezly.com/projects"
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "lxml")
+    jobs = soup.find_all("a")
+    for job in jobs:
+        title = job.text.lower()
+        if any(k in title for k in keywords):
+            link = job.get("href")
+            if link and link not in sent_links:
+                send(title, link, "Nafezly")
+                sent_links.add(link)
+
+def check_upwork():
+    url = "https://www.upwork.com/nx/search/jobs/?q=data%20analysis"
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "lxml")
+    jobs = soup.find_all("a")
+    for job in jobs:
+        title = job.text.lower()
+        if any(k in title for k in keywords):
+            link = job.get("href")
+            if link and link not in sent_links:
+                link = "https://www.upwork.com" + link
+                send(title, link, "Upwork")
+                sent_links.add(link)
+
+def check_khamsat():
+    url = "https://khamsat.com/community/requests"
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "lxml")
+    jobs = soup.find_all("a")
+    for job in jobs:
+        title = job.text.lower()
+        if any(k in title for k in keywords):
+            link = job.get("href")
+            if link and link not in sent_links:
+                link = "https://khamsat.com" + link
+                send(title, link, "Khamsat")
+                sent_links.add(link)
+
+# -----------------------------
+# رسالة الترحيب عند /start
+# -----------------------------
+def start(update, context):
+    context.bot.send_message(chat_id=update.effective_chat.id,
+                             text="مرحبًا! 👋\n"
+                                  "البوت شغال وسيقوم بإرسال كل الوظائف التي تطابق كلماتك المفتاحية فور نزولها على المواقع:\n"
+                                  "Mostaql, Khamsat, Nafezly, Upwork.\n"
+                                  "استمتع بالعمل الحر! 🚀")
+
+# -----------------------------
+# تشغيل البوت مع Command Handler
+# -----------------------------
+updater = Updater(token=TOKEN, use_context=True)
+dispatcher = updater.dispatcher
+
+start_handler = CommandHandler('start', start)
+dispatcher.add_handler(start_handler)
+
+updater.start_polling()
+
+# -----------------------------
+# تشغيل فحص الوظائف في Thread منفصل
+# -----------------------------
+def run_checks():
+    while True:
+        try:
+            check_mostaql()
+            check_nafezly()
+            check_upwork()
+            check_khamsat()
+        except Exception as e:
+            print("خطأ أثناء الفحص:", e)
+        time.sleep(30)  # فحص كل 30 ثانية
+
+threading.Thread(target=run_checks).start()
