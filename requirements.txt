@@ -7,3 +7,4 @@ python-dotenv==1.0.0
 setuptools<81
 urllib3==1.26.18
 six==1.16.0
+pytz==2024.1
