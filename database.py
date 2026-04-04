@@ -69,21 +69,26 @@ class JobsDatabase:
             return False
 
     def get_new_jobs(self, limit: int = 20) -> List[Dict]:
-        conn = self.connect()
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
+        try:
+            conn = self.connect()
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
 
-        cur.execute("""
-        SELECT platform, title, url, price, description, posted_date, scraped_date
-        FROM jobs
-        ORDER BY id DESC
-        LIMIT ?
-        """, (limit,))
+            cur.execute("""
+            SELECT platform, title, url, price, description, posted_date, scraped_date
+            FROM jobs
+            ORDER BY id DESC
+            LIMIT ?
+            """, (limit,))
 
-        rows = cur.fetchall()
-        conn.close()
+            rows = cur.fetchall()
+            conn.close()
 
-        return [dict(row) for row in rows]
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.error(f"get_new_jobs error: {e}")
+            return []
 
     def add_subscriber(self, chat_id: int):
         try:
@@ -97,7 +102,7 @@ class JobsDatabase:
 
             conn.commit()
             conn.close()
-            logger.info(f"تم حفظ المشترك: {chat_id}")
+            logger.info(f"✅ تم حفظ المشترك: {chat_id}")
 
         except Exception as e:
             logger.error(f"add_subscriber error: {e}")
@@ -112,6 +117,30 @@ class JobsDatabase:
             conn.close()
 
             return [int(row[0]) for row in rows]
+
         except Exception as e:
             logger.error(f"get_subscribers error: {e}")
             return []
+
+    def count_jobs(self) -> int:
+        try:
+            conn = self.connect()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM jobs")
+            count = cur.fetchone()[0]
+            conn.close()
+            return count
+        except Exception as e:
+            logger.error(f"count_jobs error: {e}")
+            return 0
+
+    def clear_jobs(self):
+        try:
+            conn = self.connect()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM jobs")
+            conn.commit()
+            conn.close()
+            logger.info("🗑️ تم مسح كل الوظائف من قاعدة البيانات")
+        except Exception as e:
+            logger.error(f"clear_jobs error: {e}")
