@@ -1,97 +1,117 @@
 import sqlite3
-import json
-from datetime import datetime
-from typing import List, Dict
+import logging
+from typing import Dict, List
+
+logger = logging.getLogger(__name__)
+
 
 class JobsDatabase:
-    def __init__(self, db_path="jobs.db"):
-        self.db_path = db_path
-        self.init_db()
-    
-    def init_db(self):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                platform TEXT,
-                title TEXT,
-                url TEXT UNIQUE,
-                price TEXT,
-                description TEXT,
-                posted_date TEXT,
-                scraped_date TEXT,
-                notified_users TEXT DEFAULT '[]'
-            )
-        ''')
+    def __init__(self, db_name="jobs.db"):
+        self.db_name = db_name
+        self.create_tables()
+
+    def connect(self):
+        return sqlite3.connect(self.db_name)
+
+    def create_tables(self):
+        conn = self.connect()
+        cur = conn.cursor()
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT,
+            title TEXT,
+            url TEXT UNIQUE,
+            price TEXT,
+            description TEXT,
+            posted_date TEXT,
+            scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS subscribers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
         conn.commit()
         conn.close()
-    
-    def save_job(self, platform: str, job_data: Dict) -> bool:
-        """Save job if not exists"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR IGNORE INTO jobs 
-            (platform, title, url, price, description, posted_date, scraped_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            platform,
-            job_data['title'],
-            job_data['url'],
-            job_data.get('price', 'غير محدد'),
-            job_data.get('description', ''),
-            job_data.get('posted_date', ''),
-            datetime.now().isoformat()
-        ))
-        
-        conn.commit()
+
+    def save_job(self, platform: str, job: Dict) -> bool:
+        try:
+            conn = self.connect()
+            cur = conn.cursor()
+
+            cur.execute("""
+            INSERT INTO jobs (platform, title, url, price, description, posted_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                platform,
+                job.get("title", ""),
+                job.get("url", ""),
+                job.get("price", ""),
+                job.get("description", ""),
+                job.get("posted_date", "")
+            ))
+
+            conn.commit()
+            conn.close()
+            return True
+
+        except sqlite3.IntegrityError:
+            return False
+        except Exception as e:
+            logger.error(f"save_job error: {e}")
+            return False
+
+    def get_new_jobs(self, limit: int = 20) -> List[Dict]:
+        conn = self.connect()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT platform, title, url, price, description, posted_date, scraped_date
+        FROM jobs
+        ORDER BY id DESC
+        LIMIT ?
+        """, (limit,))
+
+        rows = cur.fetchall()
         conn.close()
-        return cursor.rowcount > 0
-    
-    def get_new_jobs(self) -> List[Dict]:
-        """Get jobs from last 24 hours"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT * FROM jobs 
-            WHERE scraped_date > datetime('now', '-1 day')
-            ORDER BY scraped_date DESC
-        ''')
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        jobs = []
-        for row in rows:
-            jobs.append({
-                'id': row[0],
-                'platform': row[1],
-                'title': row[2],
-                'url': row[3],
-                'price': row[4],
-                'description': row[5],
-                'posted_date': row[6],
-                'scraped_date': row[7]
-            })
-        return jobs
-    
-    def mark_notified(self, job_id: int, user_id: int):
-        """Mark job as notified for specific user"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT notified_users FROM jobs WHERE id = ?', (job_id,))
-        result = cursor.fetchone()
-        
-        if result:
-            users = json.loads(result[0])
-            if user_id not in users:
-                users.append(user_id)
-                cursor.execute('UPDATE jobs SET notified_users = ? WHERE id = ?', 
-                             (json.dumps(users), job_id))
-                conn.commit()
-        
-        conn.close()
+
+        return [dict(row) for row in rows]
+
+    def add_subscriber(self, chat_id: int):
+        try:
+            conn = self.connect()
+            cur = conn.cursor()
+
+            cur.execute("""
+            INSERT OR IGNORE INTO subscribers (chat_id)
+            VALUES (?)
+            """, (str(chat_id),))
+
+            conn.commit()
+            conn.close()
+            logger.info(f"تم حفظ المشترك: {chat_id}")
+
+        except Exception as e:
+            logger.error(f"add_subscriber error: {e}")
+
+    def get_subscribers(self) -> List[int]:
+        try:
+            conn = self.connect()
+            cur = conn.cursor()
+
+            cur.execute("SELECT chat_id FROM subscribers")
+            rows = cur.fetchall()
+            conn.close()
+
+            return [int(row[0]) for row in rows]
+        except Exception as e:
+            logger.error(f"get_subscribers error: {e}")
+            return []
