@@ -1,234 +1,206 @@
-import requests
-from bs4 import BeautifulSoup
-import re
-import time
-import random
 import logging
-from typing import List, Dict
-from urllib.parse import urljoin, quote
+from typing import Dict
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+
+from database import JobsDatabase
 
 logger = logging.getLogger(__name__)
 
 
-class MostaqlScraper:
-    BASE_URL = "https://mostaql.com"
-    PROJECTS_URL = "https://mostaql.com/projects"
+class TelegramBot:
+    def __init__(self, token: str, db: JobsDatabase):
+        self.token = token
+        self.db = db
+        self.updater = Updater(token=token, use_context=True)
+        self.dispatcher = self.updater.dispatcher
+        self.setup_handlers()
 
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-            "Referer": "https://mostaql.com/",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-        })
+    def setup_handlers(self):
+        self.dispatcher.add_handler(CommandHandler("start", self.start_command))
+        self.dispatcher.add_handler(CommandHandler("jobs", self.get_jobs))
+        self.dispatcher.add_handler(CommandHandler("help", self.help_command))
+        self.dispatcher.add_handler(CommandHandler("test", self.test_command))
+        self.dispatcher.add_handler(CommandHandler("subscribers", self.subscribers_command))
+        self.dispatcher.add_handler(CallbackQueryHandler(self.button_callback))
 
-        self.keywords = [
-            "excel", "اكسل",
-            "power bi", "powerbi",
-            "dashboard", "dash board", "داشبورد", "داش بورد",
-            "تحليل بيانات", "تحليل", "بيانات",
-            "data analysis", "data analyst",
-            "web scraping", "scraping", "scraper", "سحب بيانات",
-            "data entry", "تنظيف بيانات", "cleaning data"
-        ]
-
-    def normalize_text(self, text: str) -> str:
-        if not text:
-            return ""
-        text = text.lower().strip()
-        text = re.sub(r"\s+", " ", text)
-        return text
-
-    def is_relevant(self, text: str) -> bool:
-        text = self.normalize_text(text)
-        return any(k.lower() in text for k in self.keywords)
-
-    def fix_url(self, href: str) -> str:
-        if not href:
-            return self.PROJECTS_URL
-        return urljoin(self.BASE_URL, href)
-
-    def extract_project_id(self, href: str) -> int:
-        match = re.search(r"/project/(\d+)", href or "")
-        return int(match.group(1)) if match else 0
-
-    def extract_price_from_text(self, text: str) -> str:
-        if not text:
-            return "غير محدد"
-
-        patterns = [
-            r'(\d[\d,\.]*\s*-\s*\d[\d,\.]*\s*\$)',
-            r'(\d[\d,\.]*\s*\$)',
-            r'(\$\s*\d[\d,\.]*\s*-\s*\d[\d,\.]*)',
-            r'(\$\s*\d[\d,\.]*)',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1).strip()
-
-        return "غير محدد"
-
-    def extract_price_from_card(self, card) -> str:
+    def start_command(self, update: Update, context: CallbackContext):
         try:
-            return self.extract_price_from_text(card.get_text(" ", strip=True))
-        except Exception:
-            return "غير محدد"
+            chat_id = update.effective_chat.id
+            self.db.add_subscriber(chat_id)
 
-    def get_project_details(self, url: str) -> Dict:
-        result = {
-            "description": "",
-            "price": "غير محدد"
-        }
+            text = (
+                "🎉 بوت إشعارات الفرص\n\n"
+                "تم تفعيل الإشعارات التلقائية بنجاح ✅\n\n"
+                "الأوامر:\n"
+                "/jobs - آخر 10 فرص\n"
+                "/test - اختبار الإشعار\n"
+                "/subscribers - عدد المشتركين\n"
+                "/help - المساعدة"
+            )
+            update.message.reply_text(text)
 
-        try:
-            time.sleep(random.uniform(0.8, 1.5))
-            response = self.session.get(url, timeout=20)
-            response.raise_for_status()
+            self.updater.bot.send_message(
+                chat_id=chat_id,
+                text="✅ تم تسجيلك في الإشعارات بنجاح. دي رسالة اختبار."
+            )
 
-            soup = BeautifulSoup(response.text, "html.parser")
-            text = soup.get_text(" ", strip=True)
-
-            result["price"] = self.extract_price_from_text(text)
-
-            # محاولة التقاط وصف مفيد
-            blocks = soup.find_all(["p", "div", "section"])
-            best_text = ""
-            for block in blocks:
-                block_text = block.get_text(" ", strip=True)
-                if len(block_text) > len(best_text):
-                    best_text = block_text
-
-            if best_text:
-                result["description"] = best_text[:1200]
+            logger.info(f"✅ start_command success for chat_id={chat_id}")
 
         except Exception as e:
-            logger.warning(f"تعذر قراءة تفاصيل المشروع: {url} | {e}")
+            logger.error(f"❌ start_command error: {e}")
+            update.message.reply_text(f"حدث خطأ أثناء التفعيل: {e}")
 
-        return result
+    def build_jobs_message(self, jobs, title_prefix="📊 آخر"):
+        if not jobs:
+            return "📭 لا توجد فرص جديدة"
 
-    def collect_projects_from_page(self, page_url: str) -> List[Dict]:
-        projects = []
+        recent = jobs[:10]
+        lines = [f"{title_prefix} {len(recent)} فرصة:\n"]
 
+        for i, job in enumerate(recent, 1):
+            title = job.get("title", "بدون عنوان")
+            url = job.get("url", "")
+            price = job.get("price", "غير محدد")
+            platform = job.get("platform", "unknown").replace("_", " ").title()
+            posted_date = str(job.get("posted_date", job.get("scraped_date", "")))[:16]
+
+            lines.extend([
+                f"{i}. {title}",
+                f"💰 {price}",
+                f"🌐 {platform}",
+                f"📅 {posted_date}",
+                f"🔗 {url}",
+                ""
+            ])
+
+        return "\n".join(lines)
+
+    def get_jobs(self, update: Update, context: CallbackContext):
         try:
-            response = self.session.get(page_url, timeout=20)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
+            jobs = self.db.get_new_jobs(limit=10)
+            logger.info(f"📦 /jobs requested - found {len(jobs)} jobs")
 
-            links = soup.find_all("a", href=re.compile(r"^/project/\d+"))
-            seen = set()
+            if not jobs:
+                update.message.reply_text("📭 لا توجد وظائف محفوظة في قاعدة البيانات حالياً")
+                return
 
-            for link in links:
-                href = link.get("href", "").strip()
-                if not href:
-                    continue
+            message = self.build_jobs_message(jobs, title_prefix="📊 آخر")
 
-                full_url = self.fix_url(href)
-                if full_url in seen:
-                    continue
-                seen.add(full_url)
+            keyboard = [[InlineKeyboardButton("🔄 تحديث", callback_data="refresh_jobs")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
-                title = (
-                    link.get_text(" ", strip=True)
-                    or link.get("title", "")
-                    or link.get("aria-label", "")
-                    or ""
-                ).strip()
-
-                if len(title) < 5:
-                    continue
-
-                project_id = self.extract_project_id(href)
-                card = link.find_parent(["div", "article", "li", "section"])
-                card_text = card.get_text(" ", strip=True) if card else ""
-                card_price = self.extract_price_from_card(card) if card else "غير محدد"
-
-                projects.append({
-                    "id": project_id,
-                    "title": title,
-                    "url": full_url,
-                    "card_text": card_text,
-                    "card_price": card_price
-                })
+            update.message.reply_text(
+                message,
+                reply_markup=reply_markup,
+                disable_web_page_preview=False
+            )
 
         except Exception as e:
-            logger.error(f"خطأ أثناء قراءة صفحة مستقل: {page_url} | {e}")
+            logger.error(f"❌ get_jobs error: {e}")
+            update.message.reply_text(f"حدث خطأ أثناء جلب الوظائف: {e}")
 
-        return projects
+    def button_callback(self, update: Update, context: CallbackContext):
+        query = update.callback_query
+        query.answer()
 
-    def search_jobs(self) -> List[Dict]:
-        logger.info("🔍 البحث في مستقل عن آخر المشاريع المطابقة...")
-        collected = []
+        try:
+            if query.data == "refresh_jobs":
+                jobs = self.db.get_new_jobs(limit=10)
 
-        # أول 3 صفحات من المشاريع لزيادة فرصة الوصول لأحدث 10 مطابقين
-        page_urls = [
-            self.PROJECTS_URL,
-            f"{self.PROJECTS_URL}?page=2",
-            f"{self.PROJECTS_URL}?page=3",
-        ]
+                if not jobs:
+                    query.edit_message_text("📭 لا توجد وظائف محفوظة في قاعدة البيانات حالياً")
+                    return
 
-        for page_url in page_urls:
-            logger.info(f"📄 قراءة: {page_url}")
-            page_projects = self.collect_projects_from_page(page_url)
-            logger.info(f"📌 تم العثور على {len(page_projects)} مشروع مبدئي")
-            collected.extend(page_projects)
-            time.sleep(random.uniform(1, 2))
+                message = self.build_jobs_message(jobs, title_prefix="📊 محدث - آخر")
 
-        # إزالة التكرار
-        unique_map = {}
-        for item in collected:
-            if item["url"] not in unique_map:
-                unique_map[item["url"]] = item
+                keyboard = [[InlineKeyboardButton("🔄 تحديث", callback_data="refresh_jobs")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
 
-        all_projects = list(unique_map.values())
+                query.edit_message_text(
+                    text=message,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=False
+                )
 
-        # ترتيب بالأحدث
-        all_projects.sort(key=lambda x: x["id"], reverse=True)
+        except Exception as e:
+            logger.error(f"❌ button_callback error: {e}")
+            query.edit_message_text(f"حدث خطأ أثناء التحديث: {e}")
 
-        matched_jobs = []
+    def help_command(self, update: Update, context: CallbackContext):
+        text = (
+            "🤖 البوت يبحث في:\n"
+            "- مستقل\n"
+            "- خمسات\n\n"
+            "الأوامر:\n"
+            "/start - تفعيل الإشعارات\n"
+            "/jobs - آخر 10 فرص\n"
+            "/test - اختبار الإشعار\n"
+            "/subscribers - عدد المشتركين\n"
+            "/help - المساعدة"
+        )
+        update.message.reply_text(text)
 
-        for item in all_projects:
+    def test_command(self, update: Update, context: CallbackContext):
+        try:
+            chat_id = update.effective_chat.id
+            self.updater.bot.send_message(
+                chat_id=chat_id,
+                text="🚨 دي رسالة اختبار من البوت. الإرسال شغال."
+            )
+            logger.info(f"✅ test_command sent to {chat_id}")
+        except Exception as e:
+            logger.error(f"❌ test_command error: {e}")
+            update.message.reply_text(f"فشل إرسال رسالة الاختبار: {e}")
+
+    def subscribers_command(self, update: Update, context: CallbackContext):
+        try:
+            subscribers = self.db.get_subscribers()
+            update.message.reply_text(f"👥 عدد المشتركين الحالي: {len(subscribers)}")
+            logger.info(f"📊 subscribers count: {len(subscribers)}")
+        except Exception as e:
+            logger.error(f"❌ subscribers_command error: {e}")
+            update.message.reply_text(f"حدث خطأ: {e}")
+
+    def format_job_message(self, job: Dict) -> str:
+        title = job.get("title", "فرصة جديدة")
+        url = job.get("url", "")
+        price = job.get("price", "غير محدد")
+        platform = job.get("platform", "unknown").replace("_", " ").title()
+        posted_date = str(job.get("posted_date", ""))[:16]
+
+        return (
+            f"🚨 فرصة جديدة نزلت!\n\n"
+            f"📌 {title}\n"
+            f"💰 {price}\n"
+            f"🌐 {platform}\n"
+            f"📅 {posted_date}\n"
+            f"🔗 {url}"
+        )
+
+    def notify_subscribers(self, job: Dict):
+        subscribers = self.db.get_subscribers()
+        logger.info(f"📣 notify_subscribers called. Subscribers={len(subscribers)}")
+
+        if not subscribers:
+            logger.info("⚠️ لا يوجد مشتركين حالياً")
+            return
+
+        msg = self.format_job_message(job)
+
+        for chat_id in subscribers:
             try:
-                # مطابقة أولية من العنوان أو نص الكارد
-                initial_text = f"{item['title']} {item.get('card_text', '')}"
-                needs_deep_check = self.is_relevant(initial_text)
-
-                details = {"description": "", "price": item.get("card_price", "غير محدد")}
-
-                # لو مفيش تطابق في العنوان/الكارد، ندخل الصفحة نفسها
-                if not needs_deep_check:
-                    details = self.get_project_details(item["url"])
-                    full_text = f"{item['title']} {details.get('description', '')}"
-                    if not self.is_relevant(full_text):
-                        continue
-                else:
-                    # حتى لو مطابق، ندخل الصفحة لتحسين الوصف والسعر
-                    details = self.get_project_details(item["url"])
-
-                price = details.get("price") or item.get("card_price") or "غير محدد"
-                description = details.get("description", "")
-
-                job = {
-                    "title": f"🆕 مشروع مستقل: {item['title'][:120]}",
-                    "url": item["url"],
-                    "price": price,
-                    "description": description[:500],
-                    "posted_date": time.strftime("%Y-%m-%d %H:%M")
-                }
-
-                matched_jobs.append(job)
-                logger.info(f"✅ مطابق: {item['title'][:70]}")
-
-                if len(matched_jobs) >= 10:
-                    break
-
+                self.updater.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    disable_web_page_preview=False
+                )
+                logger.info(f"📨 notification sent to {chat_id}")
             except Exception as e:
-                logger.warning(f"تخطي مشروع أثناء المطابقة: {e}")
-                continue
+                logger.error(f"❌ failed sending notification to {chat_id}: {e}")
 
-        logger.info(f"🎯 تم جلب {len(matched_jobs)} مشروع من مستقل (آخر 10 مطابقين)")
-        return matched_jobs
+    def run(self):
+        logger.info("🚀 Starting Telegram bot polling...")
+        self.updater.start_polling()
+        self.updater.idle()
