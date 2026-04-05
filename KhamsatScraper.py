@@ -1,13 +1,16 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-import logging
 import time
 import random
+import logging
 from typing import List, Dict
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
+
+from config import REQUEST_TIMEOUT, MAX_RESULTS_PER_SITE, load_keywords
 
 logger = logging.getLogger(__name__)
+
 
 class KhamsatScraper:
     BASE_URL = "https://khamsat.com"
@@ -23,27 +26,20 @@ class KhamsatScraper:
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
         })
-
-        self.keywords = [
-            "excel", "اكسل",
-            "power bi", "powerbi",
-            "dashboard", "dash board", "داشبورد", "داش بورد",
-            "تحليل بيانات", "تحليل", "بيانات",
-            "data analysis", "data analyst",
-            "web scraping", "scraping", "scraper", "سحب بيانات",
-            "data entry", "تنظيف بيانات", "cleaning data"
-        ]
+        self.keywords = load_keywords()
 
     def normalize_text(self, text: str) -> str:
         if not text:
             return ""
         text = text.lower().strip()
+        text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+        text = text.replace("ة", "ه")
         text = re.sub(r"\s+", " ", text)
         return text
 
     def is_relevant(self, text: str) -> bool:
         text = self.normalize_text(text)
-        return any(k.lower() in text for k in self.keywords)
+        return any(self.normalize_text(k) in text for k in self.keywords)
 
     def fix_khamsat_url(self, href: str) -> str:
         if not href:
@@ -65,8 +61,8 @@ class KhamsatScraper:
         }
 
         try:
-            time.sleep(random.uniform(0.8, 1.5))
-            response = self.session.get(url, timeout=20)
+            time.sleep(random.uniform(0.8, 1.4))
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -91,7 +87,7 @@ class KhamsatScraper:
 
         try:
             logger.info("🔍 البحث في خمسات...")
-            response = self.session.get(self.REQUESTS_URL, timeout=20)
+            response = self.session.get(self.REQUESTS_URL, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -125,22 +121,21 @@ class KhamsatScraper:
                     if not self.is_relevant(full_text):
                         continue
 
-                    job = {
+                    jobs.append({
                         "title": f"🆕 طلب خمسات: {title[:120]}",
                         "url": fixed_url,
                         "price": "طلب مفتوح",
                         "description": details.get("description", "")[:500],
                         "posted_date": time.strftime("%Y-%m-%d %H:%M")
-                    }
+                    })
 
-                    jobs.append(job)
-                    logger.info(f"✅ مطابق من خمسات: {title[:60]}")
+                    logger.info(f"✅ مطابق من خمسات: {title[:70]}")
 
-                    if len(jobs) >= 10:
+                    if len(jobs) >= MAX_RESULTS_PER_SITE:
                         break
 
                 except Exception as e:
-                    logger.warning(f"تخطي طلب خمسات بسبب خطأ: {e}")
+                    logger.warning(f"تخطي طلب من خمسات بسبب خطأ: {e}")
                     continue
 
         except Exception as e:
