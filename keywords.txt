@@ -1,17 +1,28 @@
-data entry
-data analysis
-dashboard
 excel
+اكسل
 power bi
-python
-sql
-اكسل 
+powerbi
+dashboard
+dash board
+داشبورد
 داش بورد
-Power BI
-EDA
-ادخال بيانات
-تجليل بيانات
-Excel
-Microsoft Excel
+data analysis
+data analyst
+تحليل بيانات
+تحليل
+بيانات
+web scraping
+scraping
+scraper
 سحب بيانات
-Web Scrapping
+استخراج بيانات
+data entry
+تنظيف بيانات
+cleaning data
+sql
+python
+automation
+etl
+report
+reports
+تقارير
