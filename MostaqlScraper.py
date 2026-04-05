@@ -79,12 +79,13 @@ class MostaqlScraper:
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
-            text = soup.get_text(" ", strip=True)
+            page_text = soup.get_text(" ", strip=True)
 
-            result["price"] = self.extract_price_from_text(text)
+            result["price"] = self.extract_price_from_text(page_text)
 
-            blocks = soup.find_all(["p", "div", "section"])
             best_text = ""
+            blocks = soup.find_all(["p", "div", "section", "article"])
+
             for block in blocks:
                 block_text = block.get_text(" ", strip=True)
                 if len(block_text) > len(best_text):
@@ -106,41 +107,56 @@ class MostaqlScraper:
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
-            links = soup.find_all("a", href=re.compile(r"^/project/\d+"))
+            links = soup.find_all("a", href=re.compile(r"/project/\d+"))
             seen = set()
 
+            logger.info(f"📄 {page_url} | raw links found = {len(links)}")
+
             for link in links:
-                href = link.get("href", "").strip()
-                if not href:
+                try:
+                    href = (link.get("href") or "").strip()
+                    if not href:
+                        continue
+
+                    full_url = self.fix_url(href)
+                    if full_url in seen:
+                        continue
+                    seen.add(full_url)
+
+                    title = (
+                        link.get_text(" ", strip=True)
+                        or link.get("title", "")
+                        or link.get("aria-label", "")
+                        or ""
+                    ).strip()
+
+                    card = link.find_parent(["div", "article", "li", "section"])
+                    card_text = card.get_text(" ", strip=True) if card else ""
+                    card_price = self.extract_price_from_text(card_text) if card_text else "غير محدد"
+
+                    if len(title) < 5:
+                        h_tag = None
+                        if card:
+                            h_tag = card.find(["h1", "h2", "h3", "h4"])
+                        if h_tag:
+                            title = h_tag.get_text(" ", strip=True)
+
+                    if len(title) < 5:
+                        continue
+
+                    project_id = self.extract_project_id(href)
+
+                    projects.append({
+                        "id": project_id,
+                        "title": title,
+                        "url": full_url,
+                        "card_text": card_text,
+                        "card_price": card_price
+                    })
+
+                except Exception as e:
+                    logger.warning(f"collect project item error: {e}")
                     continue
-
-                full_url = self.fix_url(href)
-                if full_url in seen:
-                    continue
-                seen.add(full_url)
-
-                title = (
-                    link.get_text(" ", strip=True)
-                    or link.get("title", "")
-                    or link.get("aria-label", "")
-                    or ""
-                ).strip()
-
-                if len(title) < 5:
-                    continue
-
-                project_id = self.extract_project_id(href)
-                card = link.find_parent(["div", "article", "li", "section"])
-                card_text = card.get_text(" ", strip=True) if card else ""
-                card_price = self.extract_price_from_text(card_text) if card_text else "غير محدد"
-
-                projects.append({
-                    "id": project_id,
-                    "title": title,
-                    "url": full_url,
-                    "card_text": card_text,
-                    "card_price": card_price
-                })
 
         except Exception as e:
             logger.error(f"خطأ أثناء قراءة صفحة مستقل: {page_url} | {e}")
@@ -164,6 +180,8 @@ class MostaqlScraper:
             collected.extend(page_projects)
             time.sleep(random.uniform(1, 2))
 
+        logger.info(f"📌 total collected before dedupe = {len(collected)}")
+
         unique_map = {}
         for item in collected:
             if item["url"] not in unique_map:
@@ -172,20 +190,20 @@ class MostaqlScraper:
         all_projects = list(unique_map.values())
         all_projects.sort(key=lambda x: x["id"], reverse=True)
 
+        logger.info(f"📌 total unique projects = {len(all_projects)}")
+        for item in all_projects[:5]:
+            logger.info(f"🧪 sample project: title={item.get('title')} | url={item.get('url')}")
+
         matched_jobs = []
 
         for item in all_projects:
             try:
-                initial_text = f"{item['title']} {item.get('card_text', '')}"
-                details = {"description": "", "price": item.get("card_price", "غير محدد")}
+                details = self.get_project_details(item["url"])
+                full_text = f"{item.get('title', '')} {item.get('card_text', '')} {details.get('description', '')}"
 
-                if not self.is_relevant(initial_text):
-                    details = self.get_project_details(item["url"])
-                    full_text = f"{item['title']} {details.get('description', '')}"
-                    if not self.is_relevant(full_text):
-                        continue
-                else:
-                    details = self.get_project_details(item["url"])
+                if not self.is_relevant(full_text):
+                    logger.info(f"⏭️ not matched: {item.get('title', '')[:60]}")
+                    continue
 
                 price = details.get("price") or item.get("card_price") or "غير محدد"
                 description = details.get("description", "")
@@ -199,7 +217,7 @@ class MostaqlScraper:
                 }
 
                 matched_jobs.append(job)
-                logger.info(f"✅ مطابق: {item['title'][:70]}")
+                logger.info(f"✅ مطابق من مستقل: {item['title'][:70]}")
 
                 if len(matched_jobs) >= MAX_RESULTS_PER_SITE:
                     break
