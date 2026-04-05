@@ -1,163 +1,200 @@
-import sqlite3
 import logging
-from typing import Dict, List
+from typing import Dict
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+
+from database import JobsDatabase
 
 logger = logging.getLogger(__name__)
 
 
-class JobsDatabase:
-    def __init__(self, db_name="jobs.db"):
-        self.db_name = db_name
-        self.create_tables()
+class TelegramBot:
+    def __init__(self, token: str, db: JobsDatabase):
+        self.token = token
+        self.db = db
+        self.updater = Updater(token=token, use_context=True)
+        self.dispatcher = self.updater.dispatcher
+        self.setup_handlers()
 
-    def connect(self):
-        return sqlite3.connect(self.db_name, timeout=30)
+    def setup_handlers(self):
+        self.dispatcher.add_handler(CommandHandler("start", self.start_command))
+        self.dispatcher.add_handler(CommandHandler("jobs", self.get_jobs))
+        self.dispatcher.add_handler(CommandHandler("help", self.help_command))
+        self.dispatcher.add_handler(CommandHandler("test", self.test_command))
+        self.dispatcher.add_handler(CommandHandler("subscribers", self.subscribers_command))
+        self.dispatcher.add_handler(CallbackQueryHandler(self.button_callback))
 
-    def create_tables(self):
-        conn = self.connect()
-        cur = conn.cursor()
+    def start_command(self, update: Update, context: CallbackContext):
+        try:
+            chat_id = update.effective_chat.id
+            self.db.add_subscriber(chat_id)
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            platform TEXT,
-            title TEXT,
-            url TEXT UNIQUE,
-            price TEXT,
-            description TEXT,
-            posted_date TEXT,
-            scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            text = (
+                "🎉 بوت فرص Excel & Power BI\n\n"
+                "تم تفعيل الإشعارات التلقائية عند نزول فرص جديدة ✅\n\n"
+                "الأوامر:\n"
+                "/jobs - آخر 10 فرص\n"
+                "/test - اختبار الإشعار\n"
+                "/help - مساعدة"
+            )
+            update.message.reply_text(text)
+
+            self.updater.bot.send_message(
+                chat_id=chat_id,
+                text="✅ تم تسجيلك في الإشعارات بنجاح. دي رسالة اختبار."
+            )
+            logger.info(f"start_command ok for {chat_id}")
+
+        except Exception as e:
+            logger.error(f"start_command error: {e}")
+            if update.message:
+                update.message.reply_text(f"حدث خطأ أثناء التفعيل: {e}")
+
+    def build_jobs_message(self, jobs, title_prefix="📊 آخر"):
+        if not jobs:
+            return "📭 لا توجد فرص جديدة"
+
+        recent = jobs[:10]
+        lines = [f"{title_prefix} {len(recent)} فرصة:\n"]
+
+        for i, job in enumerate(recent, 1):
+            title = job.get("title", "بدون عنوان")
+            url = job.get("url", "")
+            price = job.get("price", "غير محدد")
+            platform = job.get("platform", "unknown").replace("_", " ").title()
+            posted_date = str(job.get("posted_date", job.get("scraped_date", "")))[:16]
+
+            lines.extend([
+                f"{i}. {title}",
+                f"💰 {price}",
+                f"🌐 {platform}",
+                f"📅 {posted_date}",
+                f"🔗 {url}",
+                ""
+            ])
+
+        return "\n".join(lines)
+
+    def get_jobs(self, update: Update, context: CallbackContext):
+        try:
+            jobs = self.db.get_new_jobs(limit=10)
+
+            if not jobs:
+                update.message.reply_text("📭 لا توجد وظائف محفوظة في قاعدة البيانات حالياً")
+                return
+
+            message = self.build_jobs_message(jobs, title_prefix="📊 آخر")
+            keyboard = [[InlineKeyboardButton("🔄 تحديث", callback_data="refresh_jobs")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            update.message.reply_text(
+                message,
+                reply_markup=reply_markup,
+                disable_web_page_preview=False
+            )
+
+        except Exception as e:
+            logger.error(f"get_jobs error: {e}")
+            update.message.reply_text(f"حدث خطأ أثناء جلب الوظائف: {e}")
+
+    def button_callback(self, update: Update, context: CallbackContext):
+        query = update.callback_query
+        query.answer()
+
+        try:
+            if query.data == "refresh_jobs":
+                jobs = self.db.get_new_jobs(limit=10)
+
+                if not jobs:
+                    query.edit_message_text("📭 لا توجد وظائف محفوظة في قاعدة البيانات حالياً")
+                    return
+
+                message = self.build_jobs_message(jobs, title_prefix="📊 محدث - آخر")
+                keyboard = [[InlineKeyboardButton("🔄 تحديث", callback_data="refresh_jobs")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                query.edit_message_text(
+                    text=message,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=False
+                )
+
+        except Exception as e:
+            logger.error(f"button_callback error: {e}")
+            query.edit_message_text(f"حدث خطأ أثناء التحديث: {e}")
+
+    def help_command(self, update: Update, context: CallbackContext):
+        text = (
+            "🤖 البوت يبحث في:\n"
+            "- مستقل\n"
+            "- خمسات\n\n"
+            "الأوامر:\n"
+            "/start - تفعيل الإشعارات\n"
+            "/jobs - آخر 10 فرص\n"
+            "/test - اختبار الإشعار\n"
+            "/subscribers - عدد المشتركين\n"
+            "/help - المساعدة"
         )
-        """)
+        update.message.reply_text(text)
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS subscribers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    def test_command(self, update: Update, context: CallbackContext):
+        try:
+            chat_id = update.effective_chat.id
+            self.updater.bot.send_message(
+                chat_id=chat_id,
+                text="🚨 دي رسالة اختبار من البوت. الإرسال شغال."
+            )
+            logger.info(f"test_command sent to {chat_id}")
+        except Exception as e:
+            logger.error(f"test_command error: {e}")
+            update.message.reply_text(f"فشل إرسال رسالة الاختبار: {e}")
+
+    def subscribers_command(self, update: Update, context: CallbackContext):
+        try:
+            subscribers = self.db.get_subscribers()
+            update.message.reply_text(f"👥 عدد المشتركين الحالي: {len(subscribers)}")
+        except Exception as e:
+            logger.error(f"subscribers_command error: {e}")
+            update.message.reply_text(f"حدث خطأ: {e}")
+
+    def format_job_message(self, job: Dict) -> str:
+        title = job.get("title", "فرصة جديدة")
+        url = job.get("url", "")
+        price = job.get("price", "غير محدد")
+        platform = job.get("platform", "unknown").replace("_", " ").title()
+        posted_date = str(job.get("posted_date", ""))[:16]
+
+        return (
+            f"🚨 فرصة جديدة نزلت!\n\n"
+            f"📌 {title}\n"
+            f"💰 {price}\n"
+            f"🌐 {platform}\n"
+            f"📅 {posted_date}\n"
+            f"🔗 {url}"
         )
-        """)
 
-        conn.commit()
-        conn.close()
+    def notify_subscribers(self, job: Dict):
+        subscribers = self.db.get_subscribers()
 
-    def save_job(self, platform: str, job: Dict) -> bool:
-        conn = None
-        try:
-            conn = self.connect()
-            cur = conn.cursor()
+        if not subscribers:
+            logger.info("لا يوجد مشتركين حالياً")
+            return
 
-            cur.execute("""
-            INSERT INTO jobs (platform, title, url, price, description, posted_date)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                platform,
-                job.get("title", ""),
-                job.get("url", ""),
-                job.get("price", ""),
-                job.get("description", ""),
-                job.get("posted_date", "")
-            ))
+        msg = self.format_job_message(job)
 
-            conn.commit()
-            return True
+        for chat_id in subscribers:
+            try:
+                self.updater.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    disable_web_page_preview=False
+                )
+                logger.info(f"notification sent to {chat_id}")
+            except Exception as e:
+                logger.error(f"notify error to {chat_id}: {e}")
 
-        except sqlite3.IntegrityError:
-            return False
-        except Exception as e:
-            logger.error(f"save_job error: {e}")
-            return False
-        finally:
-            if conn:
-                conn.close()
-
-    def get_new_jobs(self, limit: int = 20) -> List[Dict]:
-        conn = None
-        try:
-            conn = self.connect()
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-
-            cur.execute("""
-            SELECT platform, title, url, price, description, posted_date, scraped_date
-            FROM jobs
-            ORDER BY id DESC
-            LIMIT ?
-            """, (limit,))
-
-            rows = cur.fetchall()
-            return [dict(row) for row in rows]
-
-        except Exception as e:
-            logger.error(f"get_new_jobs error: {e}")
-            return []
-        finally:
-            if conn:
-                conn.close()
-
-    def add_subscriber(self, chat_id: int):
-        conn = None
-        try:
-            conn = self.connect()
-            cur = conn.cursor()
-
-            cur.execute("""
-            INSERT OR IGNORE INTO subscribers (chat_id)
-            VALUES (?)
-            """, (str(chat_id),))
-
-            conn.commit()
-            logger.info(f"✅ تم حفظ المشترك: {chat_id}")
-
-        except Exception as e:
-            logger.error(f"add_subscriber error: {e}")
-        finally:
-            if conn:
-                conn.close()
-
-    def get_subscribers(self) -> List[int]:
-        conn = None
-        try:
-            conn = self.connect()
-            cur = conn.cursor()
-
-            cur.execute("SELECT chat_id FROM subscribers")
-            rows = cur.fetchall()
-
-            return [int(row[0]) for row in rows]
-
-        except Exception as e:
-            logger.error(f"get_subscribers error: {e}")
-            return []
-        finally:
-            if conn:
-                conn.close()
-
-    def count_jobs(self) -> int:
-        conn = None
-        try:
-            conn = self.connect()
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM jobs")
-            count = cur.fetchone()[0]
-            return count
-        except Exception as e:
-            logger.error(f"count_jobs error: {e}")
-            return 0
-        finally:
-            if conn:
-                conn.close()
-
-    def clear_jobs(self):
-        conn = None
-        try:
-            conn = self.connect()
-            cur = conn.cursor()
-            cur.execute("DELETE FROM jobs")
-            conn.commit()
-            logger.info("🗑️ تم مسح كل الوظائف من قاعدة البيانات")
-        except Exception as e:
-            logger.error(f"clear_jobs error: {e}")
-        finally:
-            if conn:
-                conn.close()
+    def run(self):
+        logger.info("Starting Telegram bot polling...")
+        self.updater.start_polling()
+        self.updater.idle()
