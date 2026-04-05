@@ -7,7 +7,7 @@ import logging
 from typing import List, Dict
 from urllib.parse import urljoin
 
-from config import KEYWORDS, MAX_RESULTS_PER_SITE
+from config import MAX_RESULTS_PER_SITE
 
 logger = logging.getLogger(__name__)
 
@@ -27,18 +27,64 @@ class MostaqlScraper:
             "Upgrade-Insecure-Requests": "1",
         })
 
+        self.weighted_keywords = {
+            "excel": 4,
+            "اكسل": 4,
+            "power bi": 4,
+            "powerbi": 4,
+            "dashboard": 4,
+            "dash board": 4,
+            "داشبورد": 4,
+            "داش بورد": 4,
+            "web scraping": 4,
+            "scraping": 4,
+            "scraper": 4,
+            "سحب بيانات": 4,
+            "استخراج بيانات": 4,
+            "data entry": 3,
+            "تنظيف بيانات": 3,
+            "cleaning data": 3,
+            "etl": 3,
+            "python": 1,
+            "sql": 1,
+            "analysis": 1,
+            "data analysis": 2,
+            "تحليل بيانات": 2,
+            "report": 1,
+            "reports": 1,
+            "تقارير": 1,
+        }
+
+        self.min_score = 4
+
     def normalize_text(self, text: str) -> str:
         if not text:
             return ""
+
         text = text.lower().strip()
         text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
         text = text.replace("ة", "ه")
+        text = text.replace("ى", "ي")
         text = re.sub(r"\s+", " ", text)
         return text
 
-    def is_relevant(self, text: str) -> bool:
+    def score_text(self, text: str):
         text = self.normalize_text(text)
-        return any(self.normalize_text(k) in text for k in KEYWORDS)
+        score = 0
+        matched = []
+
+        for keyword, weight in self.weighted_keywords.items():
+            nk = self.normalize_text(keyword)
+            if nk in text:
+                score += weight
+                matched.append(keyword)
+
+        return score, matched
+
+    def is_relevant(self, text: str) -> bool:
+        score, matched = self.score_text(text)
+        logger.info(f"🔎 Mostaql matched keywords: {matched} | score={score}")
+        return score >= self.min_score
 
     def fix_url(self, href: str) -> str:
         if not href:
@@ -201,8 +247,10 @@ class MostaqlScraper:
                 details = self.get_project_details(item["url"])
                 full_text = f"{item.get('title', '')} {item.get('card_text', '')} {details.get('description', '')}"
 
-                if not self.is_relevant(full_text):
-                    logger.info(f"⏭️ not matched: {item.get('title', '')[:60]}")
+                score, matched = self.score_text(full_text)
+
+                if score < self.min_score:
+                    logger.info(f"⏭️ not matched: {item.get('title', '')[:60]} | score={score} | matched={matched}")
                     continue
 
                 price = details.get("price") or item.get("card_price") or "غير محدد"
@@ -217,7 +265,7 @@ class MostaqlScraper:
                 }
 
                 matched_jobs.append(job)
-                logger.info(f"✅ مطابق من مستقل: {item['title'][:70]}")
+                logger.info(f"✅ مطابق من مستقل: {item['title'][:70]} | score={score} | matched={matched}")
 
                 if len(matched_jobs) >= MAX_RESULTS_PER_SITE:
                     break
