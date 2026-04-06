@@ -5,6 +5,12 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
+# 🚫 يمنع تشغيل أكتر من run في نفس الوقت
+concurrency:
+  group: jobs-bot
+  cancel-in-progress: true
+
+# ✅ مهم علشان نقدر نعمل push
 permissions:
   contents: write
 
@@ -49,6 +55,11 @@ jobs:
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@github.com"
+
           git add jobs_state.json
+
           git diff --cached --quiet || git commit -m "update jobs state"
-          git push
+
+          git pull --rebase origin main
+
+          git push origin main
