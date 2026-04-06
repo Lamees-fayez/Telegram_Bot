@@ -1,6 +1,7 @@
 import re
 import logging
 from typing import List, Dict
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,32 @@ class KhamsatScraper:
         haystack = self._normalize(f"{title} {desc}")
         return any(k.lower() in haystack for k in self.KEYWORDS)
 
+    def _extract_job_id(self, url: str) -> str:
+        """
+        مثال:
+        https://khamsat.com/community/requests/123456-عنوان
+        يرجّع: 123456
+        """
+        if not url:
+            return ""
+
+        match = re.search(r"/community/requests/(\d+)", url)
+        if match:
+            return match.group(1)
+
+        return ""
+
+    def _canonicalize_url(self, url: str) -> str:
+        """
+        نشيل أي query params أو anchors
+        """
+        if not url:
+            return ""
+
+        parsed = urlparse(url)
+        clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        return clean_url.rstrip("/")
+
     def search_jobs(self) -> List[Dict]:
         jobs: List[Dict] = []
 
@@ -42,18 +69,14 @@ class KhamsatScraper:
             try:
                 logger.info("فتح صفحة خمسات...")
                 page.goto(self.BASE_URL, wait_until="domcontentloaded", timeout=60000)
-
-                # ندي الصفحة فرصة تحمل العناصر الديناميكية
                 page.wait_for_timeout(4000)
 
-                # ننزل لأسفل قليلًا لو الصفحة بتأخر بعض العناصر
                 page.mouse.wheel(0, 1800)
                 page.wait_for_timeout(2000)
 
-                # بدائل سيليكترز لأن تصميم الموقع قد يختلف
                 cards = page.locator("a[href*='/community/requests/']").all()
 
-                seen = set()
+                seen_ids = set()
 
                 for card in cards:
                     try:
@@ -66,16 +89,21 @@ class KhamsatScraper:
                         if not href.startswith("http"):
                             href = "https://khamsat.com" + href
 
-                        # تنظيف عنوان مكرر
-                        key = (title[:120], href)
-                        if key in seen:
+                        href = self._canonicalize_url(href)
+                        job_id = self._extract_job_id(href)
+
+                        if not job_id:
                             continue
-                        seen.add(key)
+
+                        if job_id in seen_ids:
+                            continue
+                        seen_ids.add(job_id)
 
                         if not self._matches_keywords(title):
                             continue
 
                         jobs.append({
+                            "job_id": job_id,
                             "title": title,
                             "url": href,
                             "link": href,
