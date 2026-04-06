@@ -21,7 +21,15 @@ logger = logging.getLogger(__name__)
 class JobsBot:
     def __init__(self):
         self.db = JobsDatabase()
-        self.bot = TelegramBot(TELEGRAM_TOKEN, self.db)
+
+        github_actions = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"
+        polling_enabled = not github_actions
+
+        self.bot = TelegramBot(
+            TELEGRAM_TOKEN,
+            self.db,
+            polling_enabled=polling_enabled
+        )
 
         self.scrapers = {
             "mostaql": MostaqlScraper(),
@@ -50,6 +58,10 @@ class JobsBot:
                 for job in jobs:
                     try:
                         job["platform"] = name
+
+                        if not job.get("url") and job.get("link"):
+                            job["url"] = job["link"]
+
                         saved = self.db.save_job(name, job)
 
                         if saved:
@@ -106,6 +118,13 @@ class JobsBot:
 
         logger.info("GitHub Actions mode finished")
 
+    def run_polling_mode(self):
+        if not TELEGRAM_TOKEN:
+            raise ValueError("TELEGRAM_TOKEN غير موجود")
+
+        logger.info("Polling mode started")
+        self.bot.run()
+
 
 if __name__ == "__main__":
     bot = JobsBot()
@@ -116,7 +135,7 @@ if __name__ == "__main__":
         if github_actions:
             bot.run_github_actions_mode(cycles=5, sleep_seconds=60)
         else:
-            bot.run_once()
+            bot.run_polling_mode()
     except KeyboardInterrupt:
         logger.info("تم إيقاف البوت")
     except Exception as e:
