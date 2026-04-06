@@ -9,3 +9,4 @@ six==1.16.0
 pytz==2024.1
 selenium==4.19.0
 webdriver-manager==4.0.1
+playwright==1.53.0
