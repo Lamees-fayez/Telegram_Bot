@@ -2,7 +2,7 @@ name: Jobs Bot
 
 on:
   schedule:
-    - cron: "*/3 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -47,8 +47,8 @@ jobs:
 
       - name: Commit state file
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "bot"
+          git config --global user.email "bot@github.com"
           git add jobs_state.json
-          git commit -m "update jobs state" || echo "No changes to commit"
+          git diff --cached --quiet || git commit -m "update jobs state"
           git push
