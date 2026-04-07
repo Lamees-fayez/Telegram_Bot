@@ -17,7 +17,6 @@ class TelegramBot:
         self.polling_enabled = polling_enabled
 
         self.bot = Bot(token=token)
-
         self.updater = None
         self.dispatcher = None
 
@@ -40,7 +39,7 @@ class TelegramBot:
         self.dispatcher.add_error_handler(self.error_handler)
 
     def error_handler(self, update, context):
-        logger.error("Telegram update error", exc_info=context.error)
+        logger.exception("Telegram update error", exc_info=context.error)
 
     def start_command(self, update: Update, context: CallbackContext):
         try:
@@ -48,9 +47,8 @@ class TelegramBot:
             self.db.add_subscriber(chat_id)
 
             text = (
-                "🎉 بوت فرص Excel و Power BI\n\n"
-                "تم تفعيل الإشعارات التلقائية بنجاح ✅\n\n"
-                "الأوامر المتاحة:\n"
+                "تم تشغيل البوت بنجاح ✅\n\n"
+                "الأوامر:\n"
                 "/jobs - آخر 10 فرص\n"
                 "/test - اختبار الإرسال\n"
                 "/subscribers - عدد المشتركين\n"
@@ -59,11 +57,10 @@ class TelegramBot:
             )
 
             update.message.reply_text(text)
-
             logger.info(f"start_command ok for {chat_id}")
 
         except Exception as e:
-            logger.error(f"start_command error: {e}", exc_info=True)
+            logger.exception(f"start_command error: {e}")
             if update.message:
                 update.message.reply_text(f"حدث خطأ أثناء التفعيل: {e}")
 
@@ -71,33 +68,55 @@ class TelegramBot:
         try:
             chat_id = update.effective_chat.id
             self.db.remove_subscriber(chat_id)
-            update.message.reply_text("✅ تم إلغاء الاشتراك في الإشعارات")
-            logger.info(f"stop_command ok for {chat_id}")
+            update.message.reply_text("تم إلغاء الاشتراك ✅")
         except Exception as e:
-            logger.error(f"stop_command error: {e}", exc_info=True)
-            if update.message:
-                update.message.reply_text(f"حدث خطأ أثناء إلغاء الاشتراك: {e}")
+            logger.exception(f"stop_command error: {e}")
+            update.message.reply_text(f"حدث خطأ: {e}")
 
-    def build_jobs_message(self, jobs, title_prefix="📊 آخر"):
+    def help_command(self, update: Update, context: CallbackContext):
+        update.message.reply_text(
+            "/start\n"
+            "/jobs\n"
+            "/test\n"
+            "/subscribers\n"
+            "/stop\n"
+            "/help"
+        )
+
+    def test_command(self, update: Update, context: CallbackContext):
+        try:
+            chat_id = update.effective_chat.id
+            self.bot.send_message(chat_id=chat_id, text="رسالة اختبار ✅")
+        except Exception as e:
+            logger.exception(f"test_command error: {e}")
+            update.message.reply_text(f"فشل الاختبار: {e}")
+
+    def subscribers_command(self, update: Update, context: CallbackContext):
+        try:
+            subscribers = self.db.get_subscribers()
+            update.message.reply_text(f"عدد المشتركين: {len(subscribers)}")
+        except Exception as e:
+            logger.exception(f"subscribers_command error: {e}")
+            update.message.reply_text(f"حدث خطأ: {e}")
+
+    def build_jobs_message(self, jobs, title_prefix="آخر"):
         if not jobs:
-            return "📭 لا توجد فرص جديدة"
+            return "لا توجد وظائف حاليًا"
 
-        recent = jobs[:10]
-        lines = [f"{title_prefix} {len(recent)} فرصة:\n"]
-
-        for i, job in enumerate(recent, 1):
+        lines = [f"{title_prefix} {len(jobs[:10])} وظائف:\n"]
+        for i, job in enumerate(jobs[:10], 1):
             title = job.get("title", "بدون عنوان")
             url = job.get("url", "")
             price = job.get("price", "غير محدد")
-            platform = job.get("platform", "unknown").replace("_", " ").title()
+            platform = job.get("platform", "unknown")
             posted_date = str(job.get("posted_date", job.get("scraped_date", "")))[:16]
 
             lines.extend([
                 f"{i}. {title}",
-                f"💰 {price}",
-                f"🌐 {platform}",
-                f"📅 {posted_date}",
-                f"🔗 {url}",
+                f"السعر: {price}",
+                f"الموقع: {platform}",
+                f"التاريخ: {posted_date}",
+                f"الرابط: {url}",
                 ""
             ])
 
@@ -106,13 +125,12 @@ class TelegramBot:
     def get_jobs(self, update: Update, context: CallbackContext):
         try:
             jobs = self.db.get_new_jobs(limit=10)
-
             if not jobs:
-                update.message.reply_text("📭 لا توجد وظائف محفوظة في قاعدة البيانات حالياً")
+                update.message.reply_text("لا توجد وظائف محفوظة حاليًا")
                 return
 
-            message = self.build_jobs_message(jobs, title_prefix="📊 آخر")
-            keyboard = [[InlineKeyboardButton("🔄 تحديث", callback_data="refresh_jobs")]]
+            message = self.build_jobs_message(jobs, title_prefix="آخر")
+            keyboard = [[InlineKeyboardButton("تحديث", callback_data="refresh_jobs")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             update.message.reply_text(
@@ -120,9 +138,8 @@ class TelegramBot:
                 reply_markup=reply_markup,
                 disable_web_page_preview=False
             )
-
         except Exception as e:
-            logger.error(f"get_jobs error: {e}", exc_info=True)
+            logger.exception(f"get_jobs error: {e}")
             update.message.reply_text(f"حدث خطأ أثناء جلب الوظائف: {e}")
 
     def button_callback(self, update: Update, context: CallbackContext):
@@ -132,13 +149,12 @@ class TelegramBot:
         try:
             if query.data == "refresh_jobs":
                 jobs = self.db.get_new_jobs(limit=10)
-
                 if not jobs:
-                    query.edit_message_text("📭 لا توجد وظائف محفوظة في قاعدة البيانات حالياً")
+                    query.edit_message_text("لا توجد وظائف محفوظة حاليًا")
                     return
 
-                message = self.build_jobs_message(jobs, title_prefix="📊 محدث - آخر")
-                keyboard = [[InlineKeyboardButton("🔄 تحديث", callback_data="refresh_jobs")]]
+                message = self.build_jobs_message(jobs, title_prefix="محدث")
+                keyboard = [[InlineKeyboardButton("تحديث", callback_data="refresh_jobs")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 query.edit_message_text(
@@ -146,63 +162,27 @@ class TelegramBot:
                     reply_markup=reply_markup,
                     disable_web_page_preview=False
                 )
-
         except Exception as e:
-            logger.error(f"button_callback error: {e}", exc_info=True)
+            logger.exception(f"button_callback error: {e}")
             try:
                 query.edit_message_text(f"حدث خطأ أثناء التحديث: {e}")
             except Exception:
                 pass
 
-    def help_command(self, update: Update, context: CallbackContext):
-        text = (
-            "🤖 البوت يبحث في:\n"
-            "- مستقل\n"
-            "- خمسات\n\n"
-            "الأوامر:\n"
-            "/start - تفعيل الإشعارات\n"
-            "/jobs - آخر 10 فرص\n"
-            "/test - اختبار الإرسال\n"
-            "/subscribers - عدد المشتركين\n"
-            "/stop - إلغاء الإشعارات\n"
-            "/help - المساعدة"
-        )
-        update.message.reply_text(text)
-
-    def test_command(self, update: Update, context: CallbackContext):
-        try:
-            chat_id = update.effective_chat.id
-            self.bot.send_message(
-                chat_id=chat_id,
-                text="🚨 دي رسالة اختبار من البوت. الإرسال شغال."
-            )
-            logger.info(f"test_command sent to {chat_id}")
-        except Exception as e:
-            logger.error(f"test_command error: {e}", exc_info=True)
-            update.message.reply_text(f"فشل إرسال رسالة الاختبار: {e}")
-
-    def subscribers_command(self, update: Update, context: CallbackContext):
-        try:
-            subscribers = self.db.get_subscribers()
-            update.message.reply_text(f"👥 عدد المشتركين الحالي: {len(subscribers)}")
-        except Exception as e:
-            logger.error(f"subscribers_command error: {e}", exc_info=True)
-            update.message.reply_text(f"حدث خطأ: {e}")
-
     def format_job_message(self, job: Dict) -> str:
         title = job.get("title", "فرصة جديدة")
         url = job.get("url") or job.get("link") or ""
         price = job.get("price", "غير محدد")
-        platform = job.get("platform", "unknown").replace("_", " ").title()
+        platform = job.get("platform", "unknown")
         posted_date = str(job.get("posted_date", job.get("scraped_date", "")))[:16]
 
         return (
-            f"🚨 فرصة جديدة نزلت!\n\n"
-            f"📌 {title}\n"
-            f"💰 {price}\n"
-            f"🌐 {platform}\n"
-            f"📅 {posted_date}\n"
-            f"🔗 {url}"
+            f"فرصة جديدة\n\n"
+            f"{title}\n"
+            f"السعر: {price}\n"
+            f"الموقع: {platform}\n"
+            f"التاريخ: {posted_date}\n"
+            f"{url}"
         )
 
     def notify_subscribers(self, job: Dict):
@@ -216,7 +196,7 @@ class TelegramBot:
                 logger.warning("TELEGRAM_CHAT_ID غير صالح")
 
         if not subscribers:
-            logger.info("لا يوجد مشتركين حالياً")
+            logger.info("لا يوجد مشتركين")
             return
 
         msg = self.format_job_message(job)
@@ -230,13 +210,13 @@ class TelegramBot:
                 )
                 logger.info(f"notification sent to {chat_id}")
             except Exception as e:
-                logger.error(f"notify error to {chat_id}: {e}", exc_info=True)
+                logger.exception(f"notify error to {chat_id}: {e}")
 
     def run(self):
         if not self.polling_enabled or not self.updater:
-            logger.info("Polling mode disabled. Telegram bot will only send notifications.")
+            logger.info("Polling disabled")
             return
 
-        logger.info("Starting Telegram bot polling...")
+        logger.info("Starting Telegram polling...")
         self.updater.start_polling(drop_pending_updates=True)
         self.updater.idle()
