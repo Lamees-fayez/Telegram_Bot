@@ -36,47 +36,81 @@ class JobsBot:
         if os.path.exists(self.state_file):
             try:
                 with open(self.state_file, "r", encoding="utf-8") as f:
-                    return set(json.load(f))
-            except:
-                pass
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return set(data)
+            except Exception as e:
+                logger.error(f"load_state error: {e}")
         return set()
 
     def save_state(self):
-        with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump(list(self.sent_jobs), f)
+        try:
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(list(self.sent_jobs), f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"save_state error: {e}")
 
     def build_key(self, platform, job):
-        return job.get("url") or job.get("link") or ""
+        return (job.get("url") or job.get("link") or "").strip()
 
     def run(self):
         if not TELEGRAM_TOKEN:
             raise ValueError("TELEGRAM_TOKEN missing")
 
+        # ✅ رسالة اختبار مباشرة للتأكد إن البوت يقدر يرسل
+        try:
+            test_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            logger.info(f"test_chat_id = {test_chat_id}")
+
+            if test_chat_id:
+                self.bot.bot.send_message(
+                    chat_id=test_chat_id,
+                    text="✅ test from github actions"
+                )
+                logger.info("test message sent successfully")
+            else:
+                logger.warning("TELEGRAM_CHAT_ID not found")
+        except Exception as e:
+            logger.error(f"test send error: {e}")
+
         total = 0
 
         for name, scraper in self.scrapers.items():
             try:
-                jobs = scraper.search_jobs()
+                logger.info(f"checking scraper: {name}")
+                jobs = scraper.search_jobs() or []
+                logger.info(f"{name}: jobs found = {len(jobs)}")
 
                 for job in jobs:
-                    job["platform"] = name
+                    try:
+                        job["platform"] = name
 
-                    key = self.build_key(name, job)
+                        key = self.build_key(name, job)
 
-                    if not key or key in self.sent_jobs:
-                        continue
+                        if not key:
+                            logger.warning("job skipped: no key")
+                            continue
 
-                    saved = self.db.save_job(name, job)
+                        if key in self.sent_jobs:
+                            logger.info("job skipped: already sent")
+                            continue
 
-                    if saved:
-                        self.sent_jobs.add(key)
-                        self.save_state()
+                        saved = self.db.save_job(name, job)
+                        logger.info(f"save_job returned: {saved}")
 
-                        self.bot.notify_subscribers(job)
-                        total += 1
+                        if saved:
+                            self.sent_jobs.add(key)
+                            self.save_state()
+
+                            self.bot.notify_subscribers(job)
+                            total += 1
+                            logger.info(f"new job notified: {job.get('title', '')[:70]}")
+
+                    except Exception as e:
+                        logger.error(f"job processing error in {name}: {e}")
 
             except Exception as e:
-                logger.error(f"{name} error: {e}")
+                logger.error(f"{name} scraper error: {e}")
 
         logger.info(f"done. new jobs: {total}")
 
