@@ -5,7 +5,7 @@ import logging
 import threading
 from dotenv import load_dotenv
 
-from config import TELEGRAM_TOKEN
+from config import TELEGRAM_TOKEN, SCRAPE_INTERVAL_SECONDS
 from database import JobsDatabase
 from telegram_bot import TelegramBot
 from MostaqlScraper import MostaqlScraper
@@ -40,8 +40,7 @@ class JobsBot:
 
         self.state_file = "jobs_state.json"
         self.sent_jobs = self.load_state()
-
-        self.scrape_interval = int(os.getenv("SCRAPE_INTERVAL_SECONDS", "60"))
+        self.scrape_interval = SCRAPE_INTERVAL_SECONDS
         self.stop_event = threading.Event()
 
     def load_state(self):
@@ -68,18 +67,11 @@ class JobsBot:
 
         if job_id:
             return f"{platform}:{job_id}"
-
         return f"{platform}:{url}"
 
     def scrape_all(self):
         logger.info("=" * 80)
-        logger.info("بدء البحث في كل المواقع...")
-
-        try:
-            subs = self.db.get_subscribers()
-            logger.info(f"عدد المشتركين الحالي = {len(subs)}")
-        except Exception as e:
-            logger.error(f"خطأ في قراءة المشتركين: {e}")
+        logger.info("بدء البحث في كل المواقع")
 
         total_new = 0
 
@@ -87,7 +79,7 @@ class JobsBot:
             try:
                 logger.info(f"فحص المصدر: {name}")
                 jobs = scraper.search_jobs() or []
-                logger.info(f"{name}: عدد النتائج الراجعة = {len(jobs)}")
+                logger.info(f"{name}: {len(jobs)} results")
 
                 for job in jobs:
                     try:
@@ -99,92 +91,51 @@ class JobsBot:
                         unique_key = self.build_unique_key(name, job)
 
                         if not unique_key or unique_key.endswith(":"):
-                            logger.warning(f"تم تخطي وظيفة بدون مفتاح فريد: {job.get('title', '')[:60]}")
                             continue
 
                         if unique_key in self.sent_jobs:
-                            logger.info(f"مكرر (state): {job.get('title', '')[:70]}")
                             continue
 
                         saved = self.db.save_job(name, job)
 
+                        self.sent_jobs.add(unique_key)
+                        self.save_state()
+
                         if saved:
                             total_new += 1
-                            self.sent_jobs.add(unique_key)
-                            self.save_state()
-
-                            logger.info(f"تم حفظ فرصة جديدة من {name}: {job.get('title', '')[:70]}")
                             self.bot.notify_subscribers(job)
-                        else:
-                            logger.info(f"فرصة مكررة في DB: {job.get('title', '')[:70]}")
-                            self.sent_jobs.add(unique_key)
-                            self.save_state()
 
                     except Exception as e:
-                        logger.error(f"خطأ أثناء حفظ/إرسال فرصة من {name}: {e}", exc_info=True)
+                        logger.exception(f"job processing error in {name}: {e}")
 
             except Exception as e:
-                logger.error(f"خطأ أثناء تشغيل {name}: {e}", exc_info=True)
+                logger.exception(f"scraper error in {name}: {e}")
 
-        logger.info(f"إجمالي الفرص الجديدة = {total_new}")
-        self.show_db_status()
+        logger.info(f"إجمالي الجديد = {total_new}")
         logger.info("=" * 80)
 
-    def show_db_status(self):
-        try:
-            jobs = self.db.get_new_jobs(limit=10)
-            logger.info(f"آخر الوظائف في DB = {len(jobs)}")
-
-            for job in jobs[:5]:
-                logger.info(f"{job.get('platform', '')} | {job.get('title', '')[:60]}")
-
-        except Exception as e:
-            logger.error(f"show_db_status error: {e}", exc_info=True)
-
-    def run_once(self):
-        if not TELEGRAM_TOKEN:
-            raise ValueError("TELEGRAM_TOKEN غير موجود")
-
-        logger.info("تشغيل دورة واحدة...")
-        self.scrape_all()
-
-    def run_github_actions_mode(self, cycles=5, sleep_seconds=60):
-        if not TELEGRAM_TOKEN:
-            raise ValueError("TELEGRAM_TOKEN غير موجود")
-
-        logger.info("GitHub Actions mode started")
-
-        for i in range(cycles):
-            logger.info(f"Cycle {i + 1}/{cycles} started")
-            try:
-                self.scrape_all()
-            except Exception as e:
-                logger.exception(f"خطأ في الدورة {i + 1}: {e}")
-
-            if i < cycles - 1:
-                logger.info(f"انتظار {sleep_seconds} ثانية قبل الدورة التالية...")
-                time.sleep(sleep_seconds)
-
-        logger.info("GitHub Actions mode finished")
-
     def scraping_loop(self):
-        logger.info(f"Scraping loop started. Interval = {self.scrape_interval} seconds")
+        logger.info(f"Scraping loop started every {self.scrape_interval} seconds")
 
         while not self.stop_event.is_set():
             try:
                 self.scrape_all()
             except Exception as e:
-                logger.exception(f"خطأ داخل scraping_loop: {e}")
+                logger.exception(f"scraping_loop error: {e}")
 
             if self.stop_event.wait(self.scrape_interval):
                 break
 
-        logger.info("Scraping loop stopped")
+    def run_github_actions_mode(self, cycles=5, sleep_seconds=60):
+        logger.info("GitHub Actions mode started")
+
+        for i in range(cycles):
+            logger.info(f"Cycle {i + 1}/{cycles}")
+            self.scrape_all()
+            if i < cycles - 1:
+                time.sleep(sleep_seconds)
 
     def run_polling_mode(self):
-        if not TELEGRAM_TOKEN:
-            raise ValueError("TELEGRAM_TOKEN غير موجود")
-
         logger.info("Polling mode started")
 
         scraper_thread = threading.Thread(target=self.scraping_loop, daemon=True)
@@ -198,7 +149,6 @@ class JobsBot:
 
 if __name__ == "__main__":
     bot = JobsBot()
-
     github_actions = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"
 
     try:
