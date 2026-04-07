@@ -3,7 +3,7 @@ import json
 import logging
 from dotenv import load_dotenv
 
-from config import TELEGRAM_TOKEN
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from database import JobsDatabase
 from telegram_bot import TelegramBot
 from MostaqlScraper import MostaqlScraper
@@ -55,21 +55,11 @@ class JobsBot:
     def run(self):
         logger.info("===== BOT START =====")
 
-        if not TELEGRAM_TOKEN:
-            raise ValueError("TELEGRAM_BOT_TOKEN missing")
-
-        chat_id_raw = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-
         logger.info(f"Token exists: {'YES' if TELEGRAM_TOKEN else 'NO'}")
-        logger.info(f"Token prefix: {TELEGRAM_TOKEN[:10]}...")
-        logger.info(f"TELEGRAM_CHAT_ID raw: {chat_id_raw}")
+        logger.info(f"Chat ID exists: {'YES' if TELEGRAM_CHAT_ID else 'NO'}")
 
-        # اختبار مباشر
         try:
-            if not chat_id_raw:
-                raise ValueError("TELEGRAM_CHAT_ID is empty")
-
-            chat_id = int(chat_id_raw)
+            chat_id = int(TELEGRAM_CHAT_ID)
 
             me = self.bot.bot.get_me()
             logger.info(f"Bot username: @{me.username}")
@@ -77,7 +67,7 @@ class JobsBot:
 
             self.bot.bot.send_message(
                 chat_id=chat_id,
-                text="✅ test from github actions"
+                text="✅ Bot is running from GitHub Actions"
             )
             logger.info("TEST MESSAGE SENT SUCCESSFULLY")
 
