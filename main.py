@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import time
 from dotenv import load_dotenv
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -52,35 +53,26 @@ class JobsBot:
     def build_key(self, platform, job):
         return (job.get("url") or job.get("link") or "").strip()
 
-    def run(self):
-        logger.info("===== BOT START =====")
-        logger.info(f"Token exists: {'YES' if TELEGRAM_BOT_TOKEN else 'NO'}")
-        logger.info(f"Chat ID exists: {'YES' if TELEGRAM_CHAT_ID else 'NO'}")
+    def run_once(self):
+        logger.info("===== RUN START =====")
 
         try:
             chat_id = int(TELEGRAM_CHAT_ID)
 
             me = self.bot.bot.get_me()
-            logger.info(f"Bot username: @{me.username}")
-            logger.info(f"Bot id: {me.id}")
-
-            self.bot.bot.send_message(
-                chat_id=chat_id,
-                text="✅ Bot is running from GitHub Actions"
-            )
-            logger.info("TEST MESSAGE SENT SUCCESSFULLY")
+            logger.info(f"Bot: @{me.username}")
 
         except Exception as e:
-            logger.exception(f"TEST SEND FAILED: {e}")
-            raise
+            logger.exception(f"Bot init failed: {e}")
+            return
 
         total = 0
 
         for name, scraper in self.scrapers.items():
             try:
-                logger.info(f"checking scraper: {name}")
+                logger.info(f"Checking {name}...")
                 jobs = scraper.search_jobs() or []
-                logger.info(f"{name}: jobs found = {len(jobs)}")
+                logger.info(f"{name}: {len(jobs)} jobs")
 
                 for job in jobs:
                     try:
@@ -88,33 +80,39 @@ class JobsBot:
                         key = self.build_key(name, job)
 
                         if not key:
-                            logger.warning("job skipped: no key")
                             continue
 
                         if key in self.sent_jobs:
-                            logger.info("job skipped: already sent")
                             continue
 
                         saved = self.db.save_job(name, job)
-                        logger.info(f"save_job returned: {saved}")
 
                         if saved:
                             self.sent_jobs.add(key)
                             self.save_state()
                             self.bot.notify_subscribers(job)
                             total += 1
-                            logger.info(f"new job notified: {job.get('title', '')[:70]}")
+
+                            logger.info(f"Sent: {job.get('title','')[:50]}")
 
                     except Exception as e:
-                        logger.exception(f"job processing error in {name}: {e}")
+                        logger.exception(f"Job error: {e}")
 
             except Exception as e:
                 logger.exception(f"{name} scraper error: {e}")
 
-        logger.info(f"done. new jobs: {total}")
-        logger.info("===== BOT END =====")
+        logger.info(f"New jobs: {total}")
+        logger.info("===== RUN END =====")
 
 
 if __name__ == "__main__":
     bot = JobsBot()
-    bot.run()
+
+    while True:
+        try:
+            bot.run_once()
+        except Exception as e:
+            logger.exception(f"Main loop error: {e}")
+
+        logger.info("Waiting 60 seconds...\n")
+        time.sleep(60)
