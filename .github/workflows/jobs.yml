@@ -5,12 +5,10 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
-# 🚫 يمنع تشغيل أكتر من run في نفس الوقت
 concurrency:
   group: jobs-bot
   cancel-in-progress: true
 
-# ✅ مهم علشان نقدر نعمل push
 permissions:
   contents: write
 
@@ -47,8 +45,9 @@ jobs:
 
       - name: Run Bot
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_ACTIONS: "true"
         run: python main.py
 
       - name: Commit state file
@@ -61,5 +60,4 @@ jobs:
           git diff --cached --quiet || git commit -m "update jobs state"
 
           git pull --rebase origin main
-
           git push origin main
