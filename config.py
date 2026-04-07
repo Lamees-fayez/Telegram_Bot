@@ -12,7 +12,7 @@ SCRAPE_INTERVAL_SECONDS = int(os.getenv("SCRAPE_INTERVAL_SECONDS", "60"))
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
-if not TELEGRAM_TOKEN:
+if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN is missing")
 
 if not TELEGRAM_CHAT_ID:
