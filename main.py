@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class JobsBot:
     def __init__(self):
         self.db = JobsDatabase()
-        self.bot = TelegramBot(TELEGRAM_TOKEN, self.db)
+        self.bot = TelegramBot(TELEGRAM_BOT_TOKEN, self.db)
 
         self.scrapers = {
             "mostaql": MostaqlScraper(),
@@ -54,8 +54,7 @@ class JobsBot:
 
     def run(self):
         logger.info("===== BOT START =====")
-
-        logger.info(f"Token exists: {'YES' if TELEGRAM_TOKEN else 'NO'}")
+        logger.info(f"Token exists: {'YES' if TELEGRAM_BOT_TOKEN else 'NO'}")
         logger.info(f"Chat ID exists: {'YES' if TELEGRAM_CHAT_ID else 'NO'}")
 
         try:
