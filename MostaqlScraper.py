@@ -59,6 +59,11 @@ class MostaqlScraper:
             "داش بورد": 5,
             "تقارير تفاعلية": 4,
             "تقرير تفاعلي": 4,
+            "dashboard excel": 5,
+            "excel dashboard": 5,
+            "power bi dashboard": 5,
+            "excel report": 4,
+            "تقارير excel": 4,
 
             # Data analysis / reporting
             "data analysis": 4,
@@ -71,6 +76,7 @@ class MostaqlScraper:
             "reporting": 2,
             "kpi": 3,
             "kpis": 3,
+            "data": 2,
             "تحليل بيانات": 4,
             "تحليل الداتا": 4,
             "تحليل": 2,
@@ -88,6 +94,10 @@ class MostaqlScraper:
             "sql": 2,
             "python": 2,
             "database": 2,
+            "automation": 2,
+            "api": 2,
+            "csv": 2,
+            "xlsx": 2,
             "تنظيف بيانات": 3,
             "معالجة بيانات": 3,
             "باور كويري": 4,
@@ -105,16 +115,6 @@ class MostaqlScraper:
             "جمع بيانات": 4,
             "ويب سكرابينج": 5,
             "سكرابينج": 4,
-
-            # Related business/data tools
-            "automation": 2,
-            "automated report": 3,
-            "api": 2,
-            "csv": 2,
-            "xlsx": 2,
-            "excel dashboard": 5,
-            "power bi dashboard": 5,
-            "dashboard excel": 5,
         }
 
         self.strong_keywords = {
@@ -125,10 +125,11 @@ class MostaqlScraper:
             "web scraping", "scraping", "data extraction",
             "سحب بيانات", "استخراج بيانات", "جمع بيانات",
             "تحليل بيانات", "data analysis",
-            "google sheets", "جوجل شيت", "power query", "باور كويري"
+            "google sheets", "جوجل شيت", "power query", "باور كويري",
+            "excel dashboard", "dashboard excel", "power bi dashboard"
         }
 
-        self.min_score = 3
+        self.min_score = 2
 
     def normalize_text(self, text: str) -> str:
         if not text:
@@ -143,7 +144,6 @@ class MostaqlScraper:
         for old, new in arabic_map.items():
             text = text.replace(old, new)
 
-        # remove Arabic diacritics
         text = re.sub(r"[\u0617-\u061A\u064B-\u0652]", "", text)
         text = re.sub(r"[^\w\s\+\#]", " ", text)
         text = re.sub(r"\s+", " ", text)
@@ -170,11 +170,7 @@ class MostaqlScraper:
         normalized_matched = [self.normalize_text(x) for x in matched]
         strong_hit = any(self.normalize_text(k) in normalized_matched for k in self.strong_keywords)
 
-        # قواعد مرنة أفضل:
-        # 1) لو فيه كلمة قوية -> اقبلي
-        # 2) أو لو مجموع النقاط كفاية
-        # 3) أو لو فيه كلمتين على الأقل من الكلمات المهمة
-        is_ok = strong_hit or score >= self.min_score or len(set(normalized_matched)) >= 2
+        is_ok = strong_hit or score >= self.min_score
 
         logger.info(
             f"🔎 Mostaql match check | strong_hit={strong_hit} | score={score} | matched={matched}"
@@ -218,13 +214,7 @@ class MostaqlScraper:
     def extract_best_description(self, soup: BeautifulSoup) -> str:
         candidates = []
 
-        selectors = [
-            "article",
-            "main",
-            "section",
-            "div",
-            "p",
-        ]
+        selectors = ["article", "main", "section", "div", "p"]
 
         for tag_name in selectors:
             for block in soup.find_all(tag_name):
@@ -234,7 +224,6 @@ class MostaqlScraper:
                 if len(txt) < 80:
                     continue
 
-                # استبعاد بلوكات واضحة إنها Noise
                 bad_words = [
                     "مشاريع مشابهة", "أضف عرضك الآن", "تسجيل الدخول",
                     "حسابي", "الرئيسية", "المساعدة", "سياسة الخصوصية"
@@ -247,7 +236,6 @@ class MostaqlScraper:
         if not candidates:
             return ""
 
-        # ناخد أفضل وصف بطول معقول بدل أطول شيء أعمى
         candidates.sort(key=lambda x: len(x), reverse=True)
 
         for txt in candidates:
@@ -341,7 +329,9 @@ class MostaqlScraper:
         return projects
 
     def search_jobs(self) -> List[Dict]:
+        logger.info("✅ MOSTAQL REQUESTS SCRAPER IS RUNNING")
         logger.info("🔍 البحث في مستقل...")
+
         collected = []
 
         page_urls = [
