@@ -3,7 +3,7 @@ import logging
 
 from database import JobsDatabase
 from MostaqlScraper import MostaqlScraper
-from khamsatScraper import KhamsatScraper
+from KhamsatScraper import KhamsatScraper
 from telegram_bot import TelegramBot
 
 logging.basicConfig(level=logging.INFO)
