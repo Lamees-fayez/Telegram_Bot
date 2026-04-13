@@ -1,9 +1,10 @@
 import time
 import logging
+import os
 
 from database import JobsDatabase
 from MostaqlScraper import MostaqlScraper
-from KhamsatScraper import KhamsatScraper
+from khamsatScraper import KhamsatScraper
 from telegram_bot import TelegramBot
 
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +17,10 @@ def run_bot():
     mostaql = MostaqlScraper()
     khamsat = KhamsatScraper()
 
-    telegram = TelegramBot()
+    # ✅ خد التوكن من Render
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+    telegram = TelegramBot(token=BOT_TOKEN, db=db)
 
     while True:
         try:
@@ -29,7 +33,6 @@ def run_bot():
 
             logger.info(f"📊 Total collected: {len(all_jobs)}")
 
-            # ✅ الجديد فقط
             new_jobs = db.get_new_jobs(all_jobs)
 
             logger.info(f"🔥 New jobs: {len(new_jobs)}")
