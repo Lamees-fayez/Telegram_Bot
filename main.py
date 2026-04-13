@@ -4,7 +4,7 @@ import os
 
 from database import JobsDatabase
 from MostaqlScraper import MostaqlScraper
-from KhamsatScraper import KhamsatScraper
+from khamsatScraper import KhamsatScraper
 from telegram_bot import TelegramBot
 
 logging.basicConfig(level=logging.INFO)
@@ -17,10 +17,16 @@ def run_bot():
     mostaql = MostaqlScraper()
     khamsat = KhamsatScraper()
 
-    # ✅ خد التوكن من Render
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-    telegram = TelegramBot(token=BOT_TOKEN, db=db)
+    if not bot_token:
+        raise ValueError("TELEGRAM_BOT_TOKEN is missing in environment variables")
+
+    if not chat_id:
+        raise ValueError("TELEGRAM_CHAT_ID is missing in environment variables")
+
+    telegram = TelegramBot(token=bot_token, db=db)
 
     while True:
         try:
@@ -30,15 +36,14 @@ def run_bot():
             khamsat_jobs = khamsat.search_jobs()
 
             all_jobs = mostaql_jobs + khamsat_jobs
-
             logger.info(f"📊 Total collected: {len(all_jobs)}")
 
             new_jobs = db.get_new_jobs(all_jobs)
-
             logger.info(f"🔥 New jobs: {len(new_jobs)}")
 
             if new_jobs:
-                telegram.send_jobs(new_jobs)
+                for job in new_jobs:
+                    telegram.send_job(chat_id, job)
 
             logger.info("===== RUN END =====")
 
