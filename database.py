@@ -1,58 +1,22 @@
-import os
 import sqlite3
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class JobsDatabase:
-    def __init__(self, db_name="jobs.db"):
-        self.conn = sqlite3.connect(db_name, check_same_thread=False)
-        self.create_tables()
-
-    def create_tables(self):
-        cursor = self.conn.cursor()
-
-        cursor.execute("""
+    def __init__(self):
+        self.conn = sqlite3.connect("jobs.db", check_same_thread=False)
+        self.conn.execute("""
         CREATE TABLE IF NOT EXISTS jobs (
-            unique_key TEXT PRIMARY KEY,
-            job_id TEXT,
-            title TEXT,
-            url TEXT,
-            platform TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id TEXT PRIMARY KEY
         )
         """)
 
-        self.conn.commit()
+    def exists(self, job_id: str) -> bool:
+        cur = self.conn.cursor()
+        cur.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,))
+        return cur.fetchone() is not None
 
-    def job_exists(self, unique_key: str) -> bool:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT 1 FROM jobs WHERE unique_key = ? LIMIT 1",
-            (str(unique_key),)
+    def add(self, job_id: str):
+        self.conn.execute(
+            "INSERT OR IGNORE INTO jobs (id) VALUES (?)",
+            (job_id,)
         )
-        return cursor.fetchone() is not None
-
-    def add_job(self, job: dict, unique_key: str):
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            INSERT OR IGNORE INTO jobs (unique_key, job_id, title, url, platform)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            str(unique_key),
-            str(job.get("job_id", "")),
-            str(job.get("title", "")),
-            str(job.get("url", "")),
-            str(job.get("platform", "unknown")),
-        ))
         self.conn.commit()
-
-    def get_subscribers(self):
-        chat_id = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
-        if chat_id:
-            try:
-                return [int(chat_id)]
-            except Exception:
-                return []
-        return []
